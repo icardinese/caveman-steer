@@ -1,4 +1,4 @@
-# Activation Steering improves Instruction Following  
+# Activation Steering for Caveman-style Prompts
 
 The experiments in this repository investigate the question:
 
