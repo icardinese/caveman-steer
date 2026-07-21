@@ -4,10 +4,9 @@ The experiments in this repository investigate the question:
 
 > When a model already has an instruction telling it to be concise, can **constant activation steering** push its code explanations even shorter, while keeping those explanations accurate and clear?
 
-The setup follows the line of work on activation steering for instruction following
-studied by Stolfo et al. [1], among others, applying it to a very practical usecase: the `caveman` skill for Claude. 
+The setup follows the line of work on activation steering for instruction following studied by Stolfo et al. [1], among others, applying it to a  practical usecase: the `caveman` skill for agent-based development.
 
-`caveman` is directly useful for developers who want their coding agent to drop the filler and answer concisely — its motto is *"why use many token when few token do trick"* — trimming roughly 65% of output tokens while keeping code and technical content intact. It shrinks what the agent *says*, not what it knows, entirely through prompting.
+`caveman` is useful for engineers who want their coding agent to drop the filler and answer concisely. After all, *"why use many token when few token do trick"*? By using prompts to trim definite articles and encourage fragment-style answers, the package trims roughly 65% of output tokens while keeping code and technical content intact. 
 
 The model we test is `Qwen2.5-Coder-7B-Instruct`. The thing we are trying to compress is its natural-language explanations of code. Prompting alone can already shorten these explanations; the real question is whether steering adds anything *on top of* prompting, and whether it can do so without degrading the explanation itself.
 
@@ -36,9 +35,18 @@ task. Including them would add instruction text that never applies.
 
 **3. Steer**
 
-The diff-in-means steering vector, added at inference time, on top of the **Base** prompt.
+The diff-in-means steering vector is added at inference time on top of the **Base** prompt.
 There is no conciseness instruction in the prompt here — the only pressure toward brevity
-comes from the steering vector itself. This isolates what steering does on its own.
+comes from the steering vector itself. This isolates what steering does on its own. 
+The vector is computed by difference-in-means, as in Arditi et al. [3]: the mean
+residual-stream activation over a set of concise ("caveman") generations minus the mean
+over ordinary verbose ones, taken at a chosen layer. This is a deliberately simple
+construction, but has a long lineage in the interpretability literature — activation addition
+(Turner et al. [4]), representation engineering (Zou et al. [5]), inference-time
+intervention (Li et al. [6]), contrastive activation addition (Rimsky et al. [7]), and
+mass-mean probing (Marks & Tegmark [8]) all build steering or probing directions from
+contrasts between activations. While the resulting vector is model- and prompt-specific,
+extracting one is cheap and well-tooled: libraries such as [`repeng`](https://github.com/vgel/repeng) and [`steering-vectors`](https://github.com/steering-vectors/steering-vectors) can reduce it to a few lines.
 
 **4. Prompt+Steer**
 
@@ -76,6 +84,12 @@ We split the corpus into 180 train, 50 dev, and 180 held-out test examples, and 
 The average token count reported for Base is lower than its true, uncensored value, since 95.6% of Base responses hit `MAX_NEW_TOKENS` without the model choosing to stop. The comparison we find most informative is Prompt vs. Prompt+Steer, since both are close to fully natural stopping.
 
 ![Test set: token count vs. correctness across the four conditions](results/summary_plot_test.png)
+
+The same pattern holds up across individual caveman rules — sentence length, definite-article
+compliance, and token usage all show Prompt+Steer going further than Prompt alone (95% CI,
+`src/analyze_linguistics.py`):
+
+![Sentence length, definite-article compliance, and token usage across all four conditions](results/caveman_rules_compliance.png)
 
 ## Is caveman's style actually being followed?
 
@@ -264,3 +278,27 @@ https://arxiv.org/abs/2410.12877
 
 [2] Geert Heyman, Frederik Vandeputte. "Steer Like the LLM: Activation Steering that Mimics
 Prompting." arXiv:2605.03907. https://arxiv.org/abs/2605.03907
+
+[3] Andy Arditi, Oscar Obeso, Aaquib Syed, Daniel Paleka, Nina Panickssery, Wes Gurnee, Neel
+Nanda. "Refusal in Language Models Is Mediated by a Single Direction." arXiv:2406.11717.
+https://arxiv.org/abs/2406.11717
+
+[4] Alexander Matt Turner, Lisa Thiergart, Gavin Leech, David Udell, Juan J. Vazquez, Ulisse
+Mini, Monte MacDiarmid. "Activation Addition: Steering Language Models Without Optimization."
+arXiv:2308.10248. https://arxiv.org/abs/2308.10248
+
+[5] Andy Zou, Long Phan, Sarah Chen, James Campbell, Phillip Guo, Richard Ren, Alexander Pan,
+Xuwang Yin, et al. "Representation Engineering: A Top-Down Approach to AI Transparency."
+arXiv:2310.01405. https://arxiv.org/abs/2310.01405
+
+[6] Kenneth Li, Oam Patel, Fernanda Viégas, Hanspeter Pfister, Martin Wattenberg.
+"Inference-Time Intervention: Eliciting Truthful Answers from a Language Model."
+arXiv:2306.03341. https://arxiv.org/abs/2306.03341
+
+[7] Nina Rimsky, Nick Gabrieli, Julian Schulz, Meg Tong, Evan Hubinger, Alexander Matt Turner.
+"Steering Llama 2 via Contrastive Activation Addition." arXiv:2312.06681.
+https://arxiv.org/abs/2312.06681
+
+[8] Samuel Marks, Max Tegmark. "The Geometry of Truth: Emergent Linear Structure in Large
+Language Model Representations of True/False Datasets." arXiv:2310.06824.
+https://arxiv.org/abs/2310.06824
