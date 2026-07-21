@@ -69,10 +69,10 @@ Overall, we observe the prompted *and* steered model to use fewer articles, and 
 
 ## Examples
 
-In the cases below, both `Prompt` and `Prompt + Steer` examples are judged fully correct (`correct=2`). The `Prompt` response  is already article-free, while steering compresses further without dropping explanatory value:
+In the cases below, both `Prompt` and `Prompt + Steer` examples are judged fully correct (`correct=2`). The `Prompt` response  is already article-free, while steering compresses further without dropping explanatory value. Across these five examples, Prompt+Steer cuts token count by 51% on average versus Prompt alone.
 
 <details open>
-<summary><code>initial_step</code> (CORDIC algorithm) — 86 → 29 tokens</summary>
+<summary><code>initial_step</code> (CORDIC algorithm)</summary>
 
 ```python
 def initial_step(self, phase, x, y):
@@ -97,12 +97,15 @@ def initial_step(self, phase, x, y):
             self.phase[0] = -1.0
 ```
 
-- **Prompt (86 tok):** <q>Function `initial_step` sets initial values for coordinates `x`, `y`, and phase. Depending on `MODE`, it adjusts these values based on specific conditions. If in rotation mode, it flips `x` and adjusts phase if outside [-0.5, 0.5]. In vectoring mode, it flips both `x` and `y` and sets phase to 1 or -1 based on quadrant.</q>
-- **Prompt+Steer (29 tok):** <q>Set initial values for `x`, `y`, and `phase`. Adjust based on `MODE` and input values. Continue with next step.</q>
+**Prompt:** 
+> "Function `initial_step` sets initial values for coordinates `x`, `y`, and phase. Depending on `MODE`, it adjusts these values based on specific conditions. If in rotation mode, it flips `x` and adjusts phase if outside [-0.5, 0.5]. In vectoring mode, it flips both `x` and `y` and sets phase to 1 or -1 based on quadrant."
+
+**Prompt+Steer:** 
+> "Set initial values for `x`, `y`, and `phase`. Adjust based on `MODE` and input values. Continue with next step."
 </details>
 
 <details>
-<summary><code>gen</code> (docs build) — 70 → 31 tokens</summary>
+<summary><code>gen</code> (docs build)</summary>
 
 ```python
 def gen(skipdirhtml=False):
@@ -114,12 +117,15 @@ def gen(skipdirhtml=False):
     sphinx_build['-b', 'html', '-W', '-E', 'docs', 'docs/_build/html'] & FG
 ```
 
-- **Prompt (70 tok):** <q>Function `gen` generates documentation. It first checks if `docs/changelog.rst` is unchanged using `check_git_unchanged`. If unchanged, it converts `CHANGELOG.md` to `docs/changelog.rst` using Pandoc. Then, based on `skipdirhtml`, it builds HTML and optionally dirHTML documentation using Sphinx.</q>
-- **Prompt+Steer (31 tok):** <q>Function `gen` generates documentation. Skips directory HTML build if specified. Converts Markdown changelog to RST. Builds Sphinx HTML and dirHTML outputs.</q>
+**Prompt:** 
+> "Function `gen` generates documentation. It first checks if `docs/changelog.rst` is unchanged using `check_git_unchanged`. If unchanged, it converts `CHANGELOG.md` to `docs/changelog.rst` using Pandoc. Then, based on `skipdirhtml`, it builds HTML and optionally dirHTML documentation using Sphinx."
+
+**Prompt+Steer:** 
+> "Function `gen` generates documentation. Skips directory HTML build if specified. Converts Markdown changelog to RST. Builds Sphinx HTML and dirHTML outputs."
 </details>
 
 <details>
-<summary><code>Uninstall</code> (ADB package removal) — 58 → 26 tokens</summary>
+<summary><code>Uninstall</code> (ADB package removal)</summary>
 
 ```python
 def Uninstall(self, package_name, keep_data=False, timeout_ms=None):
@@ -130,12 +136,15 @@ def Uninstall(self, package_name, keep_data=False, timeout_ms=None):
     return self.Shell(' '.join(cmd), timeout_ms=timeout_ms)
 ```
 
-- **Prompt (58 tok):** <q>Uninstalls specified app. Removes it from device. Optionally keeps user data. Uses `pm uninstall` command. Passes package name. Adds `-k` flag if keeping data. Executes via `Shell` method. Waits up to `timeout_ms`. Returns result of uninstall operation.</q>
-- **Prompt+Steer (26 tok):** <q>Uninstalls app. Removes it from device. Keeps data if specified. Runs command. Waits for completion. Returns result.</q>
+**Prompt:** 
+> "Uninstalls specified app. Removes it from device. Optionally keeps user data. Uses `pm uninstall` command. Passes package name. Adds `-k` flag if keeping data. Executes via `Shell` method. Waits up to `timeout_ms`. Returns result of uninstall operation."
+
+**Prompt+Steer:** 
+> "Uninstalls app. Removes it from device. Keeps data if specified. Runs command. Waits for completion. Returns result."
 </details>
 
 <details>
-<summary><code>_call</code> (HTTP wrapper with 401 handling) — 75 → 47 tokens</summary>
+<summary><code>_call</code> (HTTP wrapper with 401 handling)</summary>
 
 ```python
 def _call(self, path, method, body=None, headers=None):
@@ -148,12 +157,15 @@ def _call(self, path, method, body=None, headers=None):
     return resp
 ```
 
-- **Prompt (75 tok):** <q>Function `_call` makes HTTP request. Takes `path`, `method`, optional `body`, and `headers`. Calls `self.http.do_call` with these parameters. If HTTP error occurs, checks status code. If 401, raises `PermissionError` with message about insufficient permissions. Otherwise, re-raises original error. Returns response from HTTP call otherwise.</q>
-- **Prompt+Steer (47 tok):** <q>Function `_call` sends HTTP request. Takes `path`, `method`, optional `body`, and `headers`. Tries sending request. If gets `401` error, raises `PermissionError`. Otherwise, returns response.</q>
+**Prompt:** 
+> "Function `_call` makes HTTP request. Takes `path`, `method`, optional `body`, and `headers`. Calls `self.http.do_call` with these parameters. If HTTP error occurs, checks status code. If 401, raises `PermissionError` with message about insufficient permissions. Otherwise, re-raises original error. Returns response from HTTP call otherwise."
+
+**Prompt+Steer:** 
+> "Function `_call` sends HTTP request. Takes `path`, `method`, optional `body`, and `headers`. Tries sending request. If gets `401` error, raises `PermissionError`. Otherwise, returns response."
 </details>
 
 <details>
-<summary><code>callgraph</code> (static call-graph builder) — 65 → 38 tokens</summary>
+<summary><code>callgraph</code> (static call-graph builder)</summary>
 
 ```python
 def callgraph(G, stmt_list):
@@ -172,8 +184,11 @@ def callgraph(G, stmt_list):
                 G.add_edge(func_name, s.func_expr.name)
 ```
 
-- **Prompt (65 tok):** <q>Function `callgraph` takes graph `G` and list of statements `stmt_list`. It adds nodes for functions found in `stmt_list` to graph `G`. Then it iterates over these functions, adding edges to graph `G` for each function call within them. This helps visualize function calls in code structure.</q>
-- **Prompt+Steer (38 tok):** <q>Function `callgraph` takes graph `G` and list of statements `stmt_list`. It adds nodes for functions found in `stmt_list` and connects nodes with edges representing function calls.</q>
+**Prompt:** 
+> "Function `callgraph` takes graph `G` and list of statements `stmt_list`. It adds nodes for functions found in `stmt_list` to graph `G`. Then it iterates over these functions, adding edges to graph `G` for each function call within them. This helps visualize function calls in code structure."
+
+**Prompt+Steer:** 
+> "Function `callgraph` takes graph `G` and list of statements `stmt_list`. It adds nodes for functions found in `stmt_list` and connects nodes with edges representing function calls."
 </details>
 
 ### Methodology
