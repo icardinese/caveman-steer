@@ -1,62 +1,42 @@
 # Activation Steering for Caveman-style Prompts
 
-The experiments in this repository investigate the question:
+The [caveman](https://github.com/juliusbrussee/caveman) package has become very popular. Many engineers want their coding agent to drop the filler and answer concisely. Its motto is short and to the point: *"why use many token when few token do trick"*? 
 
-> When a model already has an instruction telling it to be concise, can **constant activation steering** push its code explanations even shorter, while keeping those explanations accurate and clear?
+By prompting the model to trim definite articles and favor fragment-style answers, the package cuts roughly 65% of output tokens while keeping code and technical content intact. 
 
-The setup follows the line of work on activation steering for instruction following studied by Stolfo et al. [1], among others, applying it to a  practical usecase: the `caveman` skill for agent-based development.
+Here, we ask whether activation steering can push the correctness and conciseness of these outputs even further. Our setup follows the line of work on activation steering for instruction following studied by Stolfo et al. [1], among others, applied to a practical use case: the `caveman` skill for agent-based development.
 
-`caveman` is useful for engineers who want their coding agent to drop the filler and answer concisely. After all, *"why use many token when few token do trick"*? By using prompts to trim definite articles and encourage fragment-style answers, the package trims roughly 65% of output tokens while keeping code and technical content intact. 
+The model we test is `Qwen2.5-Coder-7B-Instruct`, and the thing we are trying to compress is its natural-language explanations of code. Prompting alone can already shorten these explanations; the real question is whether steering adds anything *on top of* prompting, and whether it can do so without degrading the explanation itself. Overall, our results support Prompt+Steer outperforming the Prompt method alone.
 
-The model we test is `Qwen2.5-Coder-7B-Instruct`. The thing we are trying to compress is its natural-language explanations of code. Prompting alone can already shorten these explanations; the real question is whether steering adds anything *on top of* prompting, and whether it can do so without degrading the explanation itself.
+![Sentence length, definite-article compliance, and token usage across all four conditions](results/caveman_rules_compliance.png)
 
-To answer that, we compare four conditions for every test example.
 
-<br>
+We test four methods:
 
-## The Four Conditions
+**1. Base** — A neutral prompt: no conciseness instruction, no steering. This is our reference point for what the model does when left to its own devices.
 
-**1. Base**
+**2. Prompt** — The caveman "full" mode instruction, reproduced word for word from [caveman](https://github.com/juliusbrussee/caveman)'s `skills/caveman/SKILL.md`. We keep the opening line, the Persistence section, the Rules, the no-self-reference paragraph, and the Pattern line (assembled in `model_common.CAVEMAN_SUFFIX`).
 
-A neutral prompt — no conciseness instruction, no steering. This is our reference point
-for what the model does when left to its own devices.
+**3. Steer** — The diff-in-means steering vector, added at inference time on top of the **Base** prompt. There is no conciseness instruction in the prompt, so the only pressure toward brevity comes from the steering vector itself; this isolates what steering does on its own. The vector is computed by difference-in-means, as in Arditi et al. [3]: the mean residual-stream activation over a set of concise ("caveman") generations minus the mean over ordinary verbose ones, taken at a chosen layer. [^1]
 
-**2. Prompt**
+[^1]: This is a deliberately simple construction, but it has a long lineage in the interpretability literature — activation addition (Turner et al. [4]), representation engineering (Zou et al. [5]), inference-time intervention (Li et al. [6]), contrastive activation addition (Rimsky et al. [7]), and mass-mean probing (Marks & Tegmark [8]) all build steering or probing directions from contrasts between activations. While the resulting vector is model- and prompt-specific, extracting one is cheap and well-tooled: libraries such as [`repeng`](https://github.com/vgel/repeng) and [`steering-vectors`](https://github.com/steering-vectors/steering-vectors) can reduce it to a few lines.
 
-The caveman "full" mode instruction, reproduced word for word from
-[caveman](https://github.com/juliusbrussee/caveman)'s `skills/caveman/SKILL.md`. We keep
-the opening line, the Persistence section, the Rules, the no-self-reference paragraph, and
-the Pattern line (assembled in `model_common.CAVEMAN_SUFFIX`).
+**4. Prompt+Steer** — The same steering vector, added at inference time, but layered *on top of* the **Prompt** condition. This is our primary comparison, and it targets the central question directly.
 
-We deliberately drop three parts of the original instruction — Auto-Clarity, Boundaries,
-and the language-preservation paragraph — because the scenarios they govern (destructive
-operations, writing commits or PRs, and non-English input) simply don't occur in this
-task. Including them would add instruction text that never applies.
+### Results
 
-**3. Steer**
+| Condition | Avg tokens | Fully correct |
+|---|---|---|
+| Base | 150.0 (censored — see below) | 90-95% |
+| Prompt | 56.8 | 90-95% |
+| Steer alone | 149.9 | 90-95% |
+| **Prompt+Steer** | **49.3** | 90-95% |
 
-The diff-in-means steering vector is added at inference time on top of the **Base** prompt.
-There is no conciseness instruction in the prompt here — the only pressure toward brevity
-comes from the steering vector itself. This isolates what steering does on its own. 
-The vector is computed by difference-in-means, as in Arditi et al. [3]: the mean
-residual-stream activation over a set of concise ("caveman") generations minus the mean
-over ordinary verbose ones, taken at a chosen layer. This is a deliberately simple
-construction, but has a long lineage in the interpretability literature — activation addition
-(Turner et al. [4]), representation engineering (Zou et al. [5]), inference-time
-intervention (Li et al. [6]), contrastive activation addition (Rimsky et al. [7]), and
-mass-mean probing (Marks & Tegmark [8]) all build steering or probing directions from
-contrasts between activations. While the resulting vector is model- and prompt-specific,
-extracting one is cheap and well-tooled: libraries such as [`repeng`](https://github.com/vgel/repeng) and [`steering-vectors`](https://github.com/steering-vectors/steering-vectors) can reduce it to a few lines.
+**Steering on top of the prompt gets a further ~13% token reduction beyond prompting alone.**  Constant steering alone results in 149.9 tokens, which makes it indistinguishable from Base; the coefficient was calibrated specifically for the combined regime, not as a standalone replacement for the instruction. This matches a pattern we observed at higher coefficients during calibration: difference-of-means steering alone is substantially weaker than prompting.
 
-**4. Prompt+Steer**
+We set the max token count to 150 for cost and performance reasons. Accordingly, the average token count reported for Base is lower than it would be in a natural setting -- 95% of Base responses hit `MAX_NEW_TOKENS` without the model choosing to stop. The most informative comparison is Prompt vs. Prompt+Steer, since both are close to fully natural stopping.
 
-The same steering vector, added at inference time, but this time layered *on top of* the
-**Prompt** condition. This is our primary comparison, and it targets the central question
-directly:
-
-> Does steering still add anything once the instruction is already present?
-
-<br>
+![Test set: token count vs. correctness across the four conditions](results/summary_plot_test.png)
 
 ## The Task and Data
 
@@ -68,32 +48,13 @@ docstrings out via AST parsing (`src/data_prep.py`). This prevents answer leakag
 it, the reference explanation could bleed into the prompt body and quietly inflate the
 model's apparent accuracy. Stripping the docstrings keeps the evaluation honest.
 
-## Main Result
-
 We split the corpus into 180 train, 50 dev, and 180 held-out test examples, and report method comparisons on the test set. For correctness, we employ `gpt-4o-mini` to evaluate each output explanation, assigning a score of 0 (incorrect), 1 (partially correct), or 2 (completely correct).
-
-| Condition | Avg tokens | Fully correct |
-|---|---|---|
-| Base | 150.0 (censored — see below) | 90-95% |
-| Prompt | 56.8 | 90-95% |
-| Steer alone | 149.9 | 90-95% |
-| **Prompt+Steer** | **49.3** | 90-95% |
-
-**Steering on top of the prompt gets a further ~13% token reduction beyond prompting alone.** Constant steering alone results in 149.9 tokens, which makes it indistinguishable from Base; the coefficient was calibrated specifically for the combined regime, not as a standalone replacement for the instruction. This matches a pattern we observed at higher coefficients during calibration: difference-of-means steering alone is substantially weaker than prompting.
-
-The average token count reported for Base is lower than its true, uncensored value, since 95.6% of Base responses hit `MAX_NEW_TOKENS` without the model choosing to stop. The comparison we find most informative is Prompt vs. Prompt+Steer, since both are close to fully natural stopping.
-
-![Test set: token count vs. correctness across the four conditions](results/summary_plot_test.png)
-
-The same pattern holds up across individual caveman rules — sentence length, definite-article
-compliance, and token usage all show Prompt+Steer going further than Prompt alone (95% CI,
-`src/analyze_linguistics.py`):
-
-![Sentence length, definite-article compliance, and token usage across all four conditions](results/caveman_rules_compliance.png)
 
 ## Is caveman's style actually being followed?
 
-The rule from caveman's `SKILL.md` is explicit and mechanically checkable: "Drop: articles (a/an/the)... Fragments OK." Instead of eyeballing compliance, we ran a regex search counting how often `a`, `an`, or `the` appears despite being told not to. Article usage varies sharply across the four conditions:
+The rule from caveman's `SKILL.md` is explicit and mechanically checkable: "Drop: articles (a/an/the)... Fragments OK." 
+
+Instead of trying to eyeball compliance, we simply did a keyword search counting how often `a`, `an`, or `the` appears despite being told not to. Article usage varies sharply across the four conditions:
 
 | Condition | Responses containing a/an/the | Articles per 100 words |
 |---|---|---|
@@ -102,7 +63,9 @@ The rule from caveman's `SKILL.md` is explicit and mechanically checkable: "Drop
 | Prompt | 46.1% | 4.27 |
 | **Prompt+Steer** | **31.1%** | **2.48** |
 
-The prompt instruction (`model_common.CAVEMAN_SUFFIX`) changes model behavior substantially: articles drop roughly 66% relative to Base. Compliance with the specific "drop articles" rule remains only partial, however, and 46% of prompted responses still use one. Steer alone (calibrated for the combined regime, not as a standalone replacement) shows no effect on style either, consistent with its lack of effect on length. Steering on top of the prompt pushes compliance further than the text instruction manages alone. Overall, the model uses fewer articles at all, and at a lower rate when they do.
+Clearly, the prompt instruction (`model_common.CAVEMAN_SUFFIX`) changes model behavior substantially: articles see a 66% reduction. However, compliance with the specific "drop articles" rule is only partial, and 46% of prompted responses still use one. Steer alone (calibrated for the combined regime, not as a standalone replacement) shows no effect on style either, consistent with its lack of effect on length. Steering on top of the prompt pushes compliance further than the text instruction manages alone. 
+
+Overall, we observe the prompted *and* steered model to use fewer articles, and at a lower rate.
 
 ## Examples
 
@@ -228,8 +191,7 @@ This tradeoff is reflected in the prior literature. Stolfo et al. [1] report the
 
 Heyman & Vandeputte [2] give a mechanistic explanation. A real prompt's influence varies sharply by token position, but a constant coefficient applies the same intervention to every position, whether or not that position needs it. 
 
-Constant steering is therefore prone to oversteering. Once the coefficient exceeds what any single position calls for,
-the target attribute keeps moving in the intended direction while coherence collapses. Their fix, Prompt Steering Replacement, learns a token-specific coefficient instead of a constant one.
+Constant steering is therefore prone to oversteering. Once the coefficient exceeds what any single position calls for, the target attribute keeps moving in the intended direction while coherence collapses. Their fix, Prompt Steering Replacement, learns a token-specific coefficient instead of a constant one.
 
 Overall, conciseness and correctness seem to trade off against one other: pushing the
 coefficient for shorter responses usually costs correctness or intelligibility. But these
@@ -239,9 +201,12 @@ short without sacrificing their explanatory value.
 ![Dev sweep: token count vs. correctness across all 20 (layer, coefficient) configs](results/summary_sweep_plot_dev.png)
 
 ## Further work
+- This same approach could be applied to any open model, most easily through `transformers`.
+- As seen above, Prompt Steering Replacement (Heyman & Vandeputte) likely further improves conciseness and adherence to instructions.
+- The task is code **explanation** only. This mirrors the use case within Caveman and popular for code assistant usage as a whole.
 
-- Prompt Steering Replacement
-- The task is code **explanation** only, mirroring the use case within Caveman and popular for code assistant usage as a whole.
+## 👋
+Please connect with me on [LinkedIn](https://www.linkedin.com/in/exia/) if you found this interesting or useful! Or check out my other projects [here](https://www.eric-xia.com/).
 
 ## Running it
 
@@ -269,6 +234,7 @@ python3 src/generate.py --split test            # -> results/generations_test.js
 python3 src/judge.py --split test               # -> results/judged_test.jsonl (needs openai.key)
 python3 src/analyze.py --split test             # -> results/summary_test.json, summary_plot_test.png
 ```
+
 
 ## References
 
