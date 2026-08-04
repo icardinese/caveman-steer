@@ -12,7 +12,7 @@ from data_utils import RESULTS_DIR, read_jsonl, write_jsonl
 
 KEY_PATH = Path(__file__).resolve().parent.parent / "openai.key"
 JUDGE_MODEL = "gpt-4o-mini"
-CONDITIONS = ["base", "prompt", "const", "prompt_const"]
+CONDITIONS = ["base", "prompt", "const", "prompt_const", "psr", "prompt_psr", "a_psr", "prompt_a_psr"]
 
 RUBRIC = """You are grading an automatically generated explanation of a Python function.
 

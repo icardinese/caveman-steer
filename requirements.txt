@@ -5,3 +5,4 @@ datasets>=2.20
 openai>=1.16
 numpy
 matplotlib
+gdown
