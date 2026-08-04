@@ -1,6 +1,6 @@
 {
   "layer": 14,
-  "baseline_dev_mse": 0.05053909868001938,
-  "final_dev_mse": 0.03671307489275932,
-  "n_train_pairs": 11483
+  "baseline_dev_mse": 0.1132039725780487,
+  "final_dev_mse": 0.10513128340244293,
+  "n_train_pairs": 10924
 }
