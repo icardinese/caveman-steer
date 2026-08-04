@@ -1,8 +1,6 @@
 {
   "layer": 14,
-  "coeff": 6,
-  "avg_tokens": 51.6,
-  "full_correct_rate_dev": 0.96,
-  "prompt_dev_tokens": 59.42,
-  "selection_note": "Chosen from the full grid sweep (results/summary_sweep_dev.json) as the correctness-preserving point, not the auto-picked most-aggressive-non-degenerate config (layer 14 coeff 36, which collapsed dev full-correct rate to 40%)."
+  "coeff": 36,
+  "avg_tokens": 20.94,
+  "prompt_dev_tokens": 58.34
 }
