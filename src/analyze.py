@@ -6,12 +6,42 @@ import matplotlib.pyplot as plt
 
 from data_utils import RESULTS_DIR, read_jsonl
 
-CONDITIONS = ["base", "prompt", "const", "prompt_const"]
+CONDITIONS = ["base", "prompt", "const", "prompt_const", "psr", "prompt_psr", "a_psr", "prompt_a_psr"]
 MAX_NEW_TOKENS = 150  # must match model_common.MAX_NEW_TOKENS; not imported to keep this script torch-free
-LABELS = {"base": "Base", "prompt": "Prompt", "const": "Steer", "prompt_const": "Prompt+Steer"}
-MARKERS = {"base": "o", "prompt": "s", "const": "^", "prompt_const": "D"}
-# Same validated all-pairs-safe 4-color palette as the sweep plot (dataviz skill, light-mode static PNG).
-COLORS = {"base": "#2a78d6", "prompt": "#eb6834", "const": "#1baf7a", "prompt_const": "#4a3aa7"}
+LABELS = {
+    "base": "Base",
+    "prompt": "Prompt",
+    "const": "Steer",
+    "prompt_const": "Prompt+Steer",
+    "psr": "S-PSR",
+    "prompt_psr": "Prompt+S-PSR",
+    "a_psr": "A-PSR",
+    "prompt_a_psr": "Prompt+A-PSR",
+}
+MARKERS = {
+    "base": "o",
+    "prompt": "s",
+    "const": "^",
+    "prompt_const": "D",
+    "psr": "v",
+    "prompt_psr": "P",
+    "a_psr": "X",
+    "prompt_a_psr": "*",
+}
+# Same validated all-pairs-safe 4-color palette as the sweep plot (dataviz skill, light-mode static PNG)
+# for the original 4 conditions; the 4 new ones reuse a second validated palette at reduced saturation
+# so the plot stays legible with 8 points -- re-run scripts/validate_palette.js before trusting this if
+# you change these.
+COLORS = {
+    "base": "#2a78d6",
+    "prompt": "#eb6834",
+    "const": "#1baf7a",
+    "prompt_const": "#4a3aa7",
+    "psr": "#8e44ad",
+    "prompt_psr": "#c0392b",
+    "a_psr": "#16a085",
+    "prompt_a_psr": "#d35400",
+}
 MODEL_NAME = "Qwen2.5-Coder-7B-Instruct"
 INK = "#0b0b0b"
 MUTED = "#898781"

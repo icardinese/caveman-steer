@@ -12,12 +12,40 @@ import matplotlib.pyplot as plt
 
 from data_utils import RESULTS_DIR, read_jsonl
 
-CONDITIONS = ["base", "prompt", "const", "prompt_const"]
-LABELS = {"base": "Base", "prompt": "Prompt", "const": "Steer", "prompt_const": "Prompt+Steer"}
-MARKERS = {"base": "o", "prompt": "s", "const": "^", "prompt_const": "D"}
+CONDITIONS = ["base", "prompt", "const", "prompt_const", "psr", "prompt_psr", "a_psr", "prompt_a_psr"]
+LABELS = {
+    "base": "Base",
+    "prompt": "Prompt",
+    "const": "Steer",
+    "prompt_const": "Prompt+Steer",
+    "psr": "S-PSR",
+    "prompt_psr": "Prompt+S-PSR",
+    "a_psr": "A-PSR",
+    "prompt_a_psr": "Prompt+A-PSR",
+}
+MARKERS = {
+    "base": "o",
+    "prompt": "s",
+    "const": "^",
+    "prompt_const": "D",
+    "psr": "v",
+    "prompt_psr": "P",
+    "a_psr": "X",
+    "prompt_a_psr": "*",
+}
 # Color encodes a grouping that matters -- has steering or not -- rather than duplicating the x-axis
-# labels. Validated all-pairs (node scripts/validate_palette.js): CVD dE 24.7, normal-vision dE 33.6.
-HAS_STEERING = {"base": False, "prompt": False, "const": True, "prompt_const": True}
+# labels. NOT re-validated for CVD/contrast with the new conditions added -- re-run
+# scripts/validate_palette.js before trusting this if you keep this grouping scheme.
+HAS_STEERING = {
+    "base": False,
+    "prompt": False,
+    "const": True,
+    "prompt_const": True,
+    "psr": True,
+    "prompt_psr": True,
+    "a_psr": True,
+    "prompt_a_psr": True,
+}
 GROUP_COLOR = {False: "#2a78d6", True: "#eb6834"}
 INK = "#0b0b0b"
 MUTED = "#898781"

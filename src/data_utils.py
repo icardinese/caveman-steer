@@ -17,6 +17,14 @@ def write_jsonl(path: Path, rows: list[dict]) -> None:
             f.write(json.dumps(row) + "\n")
 
 
+def append_jsonl(path: Path, row: dict) -> None:
+    """Writes and flushes a single row immediately, for stages long enough that losing everything
+    to a mid-run crash actually matters (e.g. generate.py's ~1,440 generations)."""
+    with path.open("a") as f:
+        f.write(json.dumps(row) + "\n")
+        f.flush()
+
+
 def is_degenerate(text: str) -> bool:
     """Flags empty or heavily repetitive output, a known failure mode of over-strong steering."""
     words = text.split()

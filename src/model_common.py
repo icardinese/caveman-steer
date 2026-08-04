@@ -100,12 +100,92 @@ class PSRProbe(torch.nn.Module):
         return torch.relu(self.linear(hidden))
 
 
+class MultiLayerPSRProbe(torch.nn.Module):
+    """One PSRProbe per layer, trained jointly (A-PSR). ModuleDict keys are strings since PyTorch
+    module dicts don't accept int keys directly -- layer_indices is kept separately for convenience."""
+
+    def __init__(self, hidden_size: int, layer_indices: list[int]):
+        super().__init__()
+        self.layer_indices = layer_indices
+        self.probes = torch.nn.ModuleDict({str(l): PSRProbe(hidden_size) for l in layer_indices})
+
+    def forward(self, layer_idx: int, hidden: torch.Tensor) -> torch.Tensor:
+        return self.probes[str(layer_idx)](hidden)
+
+
 def make_psr_hook(direction: torch.Tensor, probe: torch.nn.Module) -> Callable[[torch.Tensor], torch.Tensor]:
     def hook_fn(hidden: torch.Tensor) -> torch.Tensor:
         lam = probe(hidden.float()).to(hidden.dtype)  # (batch, seq, 1), token-specific coefficient
         return hidden + lam * direction.to(hidden.dtype).to(hidden.device)
 
     return hook_fn
+
+
+@contextmanager
+def multi_steering_hook(model: PreTrainedModel, hooks: dict[int, Callable[[torch.Tensor], torch.Tensor]]):
+    """Registers a forward hook on several decoder layers at once (A-PSR / A-Const). Each layer's hook
+    sees whatever activation actually arrives there at inference time -- which already reflects any
+    correction applied by earlier layers, since hooks are chained through the real forward pass. This
+    is where the "iteratively apply the intervention at all layers" behavior from the PSR paper actually
+    happens; nothing extra needs to be done here to make that occur, it falls out of hooking multiple
+    layers in the same forward pass."""
+    handles = []
+    for layer_idx, hook_fn in hooks.items():
+        layer = model.model.layers[layer_idx]
+
+        def _make_wrapped(fn):
+            # Factory function is required here: without it, every hook in the loop would close over
+            # the same loop variable `hook_fn` by reference (Python's late-binding closures), so all
+            # layers would end up running whichever hook_fn was assigned LAST in the loop.
+            def wrapped(module, inputs, output):
+                hidden = fn(output[0])
+                return (hidden,) + tuple(output[1:])
+
+            return wrapped
+
+        handles.append(layer.register_forward_hook(_make_wrapped(hook_fn)))
+    try:
+        yield
+    finally:
+        for h in handles:
+            h.remove()
+
+
+def make_multi_psr_hooks(
+    directions: dict[int, torch.Tensor], probe: MultiLayerPSRProbe
+) -> dict[int, Callable[[torch.Tensor], torch.Tensor]]:
+    """Builds the per-layer hook dict for A-PSR, for use with multi_steering_hook."""
+    hooks = {}
+    for layer_idx, direction in directions.items():
+
+        def _make_hook(l, d):
+            def hook_fn(hidden: torch.Tensor) -> torch.Tensor:
+                lam = probe(l, hidden.float()).to(hidden.dtype)
+                return hidden + lam * d.to(hidden.dtype).to(hidden.device)
+
+            return hook_fn
+
+        hooks[layer_idx] = _make_hook(layer_idx, direction)
+    return hooks
+
+
+def make_multi_const_hooks(
+    directions: dict[int, torch.Tensor], coeff: float
+) -> dict[int, Callable[[torch.Tensor], torch.Tensor]]:
+    """A-Const: the same fixed-coefficient additive steering as S-Const, applied at every layer at once.
+    Not required by the paper's PSR comparison directly, but a natural, cheap companion baseline --
+    S-Const already exists in this repo, this is its all-layer counterpart."""
+    hooks = {}
+    for layer_idx, direction in directions.items():
+
+        def _make_hook(d):
+            def hook_fn(hidden: torch.Tensor) -> torch.Tensor:
+                return hidden + coeff * d.to(hidden.dtype).to(hidden.device)
+
+            return hook_fn
+
+        hooks[layer_idx] = _make_hook(direction)
+    return hooks
 
 
 @torch.no_grad()
