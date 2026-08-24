@@ -65,27 +65,87 @@ def summarize(rows: list[dict]) -> dict[str, dict]:
     return summary
 
 
+def _cluster_points_by_pixel_proximity(ax, points, min_pixel_gap=28):
+    transform = ax.transData.transform
+    for p in points:
+        p["px"], p["py"] = transform((p["x"], p["y"]))
+
+    remaining = sorted(points, key=lambda p: -p["py"])
+    clusters = []
+    while remaining:
+        seed = remaining.pop(0)
+        cluster = [seed]
+        still_remaining = []
+        for p in remaining:
+            near_any = any(
+                ((p["px"] - m["px"]) ** 2 + (p["py"] - m["py"]) ** 2) ** 0.5 < min_pixel_gap * 2.2
+                for m in cluster
+            )
+            (cluster if near_any else still_remaining).append(p)
+        remaining = still_remaining
+        clusters.append(cluster)
+    return clusters
+
+
+def _place_labels_without_overlap(ax, clusters, base_offset=(9, 7), stagger_step=26):
+    """Default label placement is a fixed (9,7) point offset for every marker -- fine when points are
+    spread out, but multiple conditions landing close together in (tokens, correctness) space is a
+    normal outcome, not a rare edge case, and their labels end up directly on top of each other.
+    Clusters are pre-computed by actual on-screen (pixel) proximity -- not raw data-unit distance,
+    since tokens (0-160) and correctness (0-100%) are on very different scales -- so this just fans
+    each cluster's labels out vertically with a short leader line back to its point."""
+    for cluster in clusters:
+        if len(cluster) == 1:
+            p = cluster[0]
+            ax.annotate(
+                p["label"], (p["x"], p["y"]), textcoords="offset points", xytext=base_offset,
+                fontsize=10, color=INK, linespacing=1.4,
+            )
+            continue
+        cluster_sorted = sorted(cluster, key=lambda p: p["x"])
+        for i, p in enumerate(cluster_sorted):
+            dy = base_offset[1] + i * stagger_step
+            dx = base_offset[0] + (i - (len(cluster_sorted) - 1) / 2) * 4
+            ax.annotate(
+                p["label"], (p["x"], p["y"]), textcoords="offset points", xytext=(dx, dy),
+                fontsize=10, color=INK, linespacing=1.4,
+                arrowprops=dict(arrowstyle="-", color=MUTED, linewidth=0.6, shrinkA=0, shrinkB=6),
+            )
+
+
 def plot(summary: dict[str, dict], out_path) -> None:
     fig, ax = plt.subplots(figsize=(6.5, 5.5), facecolor="#fcfcfb")
     ax.set_facecolor("#fcfcfb")
 
+    points = []
     for cond in CONDITIONS:
         s = summary[cond]
         x, y = s["avg_tokens"], s["full_correct_rate"] * 100
         ax.scatter(x, y, marker=MARKERS[cond], s=130, color=COLORS[cond], zorder=3)
-        ax.annotate(
-            f"{LABELS[cond]}\n{y:.1f}%",
-            (x, y),
-            textcoords="offset points",
-            xytext=(9, 7),
-            fontsize=10,
-            color=INK,
-            linespacing=1.4,
-        )
+        points.append({"cond": cond, "x": x, "y": y, "label": f"{LABELS[cond]}\n{y:.1f}%"})
 
-    ymin, ymax = ax.get_ylim()
-    ax.set_ylim(ymin - 0.3, ymax + 0.9)  # headroom so top annotations clear the title
     ax.set_xlim(0, 160)
+    ymin, ymax = ax.get_ylim()
+    ax.set_ylim(ymin - 0.3, ymax + 0.9)  # base headroom, expanded further below if a cluster needs more
+    fig.canvas.draw()  # need a real transData to detect pixel-space clusters against actual axis limits
+
+    clusters = _cluster_points_by_pixel_proximity(ax, points)
+
+    # Whichever cluster stacks the most labels determines how much extra headroom is actually needed --
+    # computed from the real cluster sizes found, not a fixed guessed constant, so this doesn't quietly
+    # break again the next time a run happens to produce a differently-shaped cluster of results.
+    max_stagger_points = max((len(c) - 1) * 26 for c in clusters) if clusters else 0
+    if max_stagger_points > 0:
+        px_per_data_unit = ax.get_window_extent().height / (ax.get_ylim()[1] - ax.get_ylim()[0])
+        px_per_point = fig.dpi / 72.0
+        needed_data_units = (max_stagger_points + 20) * px_per_point / px_per_data_unit  # +20pt for label text height
+        current_top_margin = ax.get_ylim()[1] - max(p["y"] for p in points)
+        if needed_data_units > current_top_margin:
+            ax.set_ylim(ax.get_ylim()[0], max(p["y"] for p in points) + needed_data_units)
+            fig.canvas.draw()  # transData changed with the new ylim -- redetect clusters against it
+            clusters = _cluster_points_by_pixel_proximity(ax, points)
+
+    _place_labels_without_overlap(ax, clusters)
 
     ax.axvline(MAX_NEW_TOKENS, color="#e34948", linestyle=(0, (1, 2)), linewidth=1.5, zorder=2)
     ax.annotate(
