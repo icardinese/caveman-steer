@@ -1,25 +1,49 @@
 {
   "base": {
-    "avg_tokens": 149.95555555555555,
-    "full_correct_rate": 0.9333333333333333,
+    "avg_tokens": 149.93333333333334,
+    "full_correct_rate": 0.95,
     "any_correct_rate": 1.0,
     "coherent_rate": 1.0
   },
   "prompt": {
-    "avg_tokens": 56.82222222222222,
-    "full_correct_rate": 0.9166666666666666,
+    "avg_tokens": 57.2,
+    "full_correct_rate": 0.9333333333333333,
     "any_correct_rate": 1.0,
     "coherent_rate": 1.0
   },
   "const": {
-    "avg_tokens": 149.90555555555557,
-    "full_correct_rate": 0.9166666666666666,
+    "avg_tokens": 129.76666666666668,
+    "full_correct_rate": 0.9777777777777777,
     "any_correct_rate": 1.0,
     "coherent_rate": 1.0
   },
   "prompt_const": {
-    "avg_tokens": 49.34444444444444,
-    "full_correct_rate": 0.9222222222222223,
+    "avg_tokens": 20.2,
+    "full_correct_rate": 0.37222222222222223,
+    "any_correct_rate": 0.9944444444444445,
+    "coherent_rate": 0.9944444444444445
+  },
+  "psr": {
+    "avg_tokens": 149.86666666666667,
+    "full_correct_rate": 0.9388888888888889,
+    "any_correct_rate": 1.0,
+    "coherent_rate": 1.0
+  },
+  "prompt_psr": {
+    "avg_tokens": 46.111111111111114,
+    "full_correct_rate": 0.8666666666666667,
+    "any_correct_rate": 1.0,
+    "coherent_rate": 1.0
+  },
+  "a_psr": {
+    "avg_tokens": 132.4777777777778,
+    "full_correct_rate": 0.9555555555555556,
+    "any_correct_rate": 1.0,
+    "coherent_rate": 1.0
+  },
+  "prompt_a_psr": {
+    "avg_tokens": 28.366666666666667,
+    "full_correct_rate": 0.6,
     "any_correct_rate": 1.0,
     "coherent_rate": 1.0
   }
