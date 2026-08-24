@@ -66,7 +66,12 @@ def regularization_loss(fit_vals: torch.Tensor, reg_coeff: float) -> torch.Tenso
 
 
 def precompute_responses(model, tokenizer, rows: list[dict]) -> dict:
-    """Generates the teacher-forcing target response ONCE per row and caches it, keyed by row['id'].
+    """Generates the teacher-forcing target response ONCE per row and caches it, keyed by
+    str(row['id']) -- always stringified, even though row['id'] is an int in the data. json.dump
+    stringifies dict keys unconditionally, so if this used the raw int here, a fresh in-memory call
+    would produce int keys while a cache-file reload would produce str keys, and any lookup after a
+    reload would KeyError. Keying by str() from the start makes both paths identical.
+
     Deterministic (do_sample=False in generate_response), so regenerating it per-epoch and per-pooling-
     pass is pure waste -- this is the single biggest cost in the whole script (150-token autoregressive
     generation per row), and it was being paid 4x (once for pooling + once per of 3 epochs) before this
@@ -74,7 +79,7 @@ def precompute_responses(model, tokenizer, rows: list[dict]) -> dict:
     responses = {}
     for row in rows:
         terse_prompt = build_prompt(tokenizer, row["code"], terse=True)
-        responses[row["id"]] = generate_response(model, tokenizer, terse_prompt)
+        responses[str(row["id"])] = generate_response(model, tokenizer, terse_prompt)
     return responses
 
 
@@ -105,7 +110,7 @@ def collect_pooled_activations_for_conceptor(
     for row in rows:
         base_prompt = build_prompt(tokenizer, row["code"], terse=False)
         terse_prompt = build_prompt(tokenizer, row["code"], terse=True)
-        teacher_response = responses[row["id"]]
+        teacher_response = responses[str(row["id"])]
         resp_ids = tokenizer(teacher_response, return_tensors="pt", add_special_tokens=False)["input_ids"].to(model.device)
         if resp_ids.shape[1] == 0:
             continue
@@ -133,7 +138,7 @@ def collect_live_training_pair(
     cache -- no generation happens in here anymore, this just tokenizes the cached string."""
     base_prompt = build_prompt(tokenizer, row["code"], terse=False)
     terse_prompt = build_prompt(tokenizer, row["code"], terse=True)
-    teacher_response = responses[row["id"]]
+    teacher_response = responses[str(row["id"])]
     resp_ids = tokenizer(teacher_response, return_tensors="pt", add_special_tokens=False)["input_ids"].to(model.device)
     if resp_ids.shape[1] == 0:
         return None
