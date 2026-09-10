@@ -215,9 +215,135 @@ short without sacrificing their explanatory value.
 
 ![Dev sweep: token count vs. correctness across all 20 (layer, coefficient) configs](results/summary_sweep_plot_dev.png)
 
+## Beyond Constant Steering: PSR and Conceptors
+
+Constant steering has a structural problem, and it's the reason its coefficient had to be
+calibrated conservatively above: a single scalar coefficient applies the *same* intervention to
+every token position, whether or not that position needs it. Heyman & Vandeputte [2] call this
+out directly — a real prompt's influence on generation varies sharply by position, but a constant
+coefficient can't. Push the coefficient up to compress harder, and coherence collapses at whichever
+positions didn't need the extra push in the first place; that's exactly the coefficient-20 cliff in
+the sweep above.
+
+**Prompt Steering Replacement (PSR)** fixes this by learning a *token-specific* coefficient instead
+of a constant one:
+
+```
+location_fit(h)  = ReLU(w · h + b)              -- how much THIS token needs steering
+coefficient(h)   = (1 + b_m) · location_fit(h)   -- b_m: a learned scalar offset
+correction(h)    = coefficient(h) · direction    -- added into the residual stream at the chosen layer
+```
+
+`w`, `b`, and `b_m` are trained; `direction` is a fixed unit vector (how it's obtained is the one
+axis this repo varies — see below). Training target: the corrected hidden states, at the injection
+layer *and every layer after it*, should match what the model's hidden states actually look like
+when the concise instruction is in the prompt. Concretely, for each training example we run two
+forward passes — one with the caveman instruction in the prompt (no-grad, this is the fixed
+target), one without it but with the gate's correction injected (live, gradient-tracked, since the
+correction changes every step) — and minimize the MSE between them, summed over the injection layer
+and all subsequent layers. A regularization term, `relu(1 - Σ location_fit).mean()`, penalizes the
+gate for switching off at every position; without it, the ReLU gate has a degenerate all-zero
+solution available and nothing pushes it away from finding it. The correction is also masked to only
+the response-token span (`answer_only`) — PSR's whole premise is selective intervention, so this is
+enforced directly rather than left as something the gate might learn to do on its own.
+
+Two variants of `direction` are implemented, isolating exactly one thing between them:
+
+- **`train_psr_proper.py`** — `direction` is jointly gradient-trained alongside the gate, from the
+  same default initialization Heyman & Vandeputte use. This is the paper-faithful design.
+- **`train_psr_conceptor.py`** — `direction` comes from a **conceptor** instead (below), computed
+  once in closed form and then held fixed while only the gate trains.
+
+### Conceptors
+
+A single trained or mean-difference direction collapses a concept onto one line through activation
+space. If "terse vs. verbose" actually occupies a multi-dimensional subspace — plausible, since it
+shows up lexically, syntactically, and structurally all at once — a rank-1 direction is discarding
+most of that geometry. Conceptors (Jaeger [9]) represent a concept as a **soft projection matrix**
+instead of a vector, estimated directly from the correlation structure of the concept's own
+activations, and are Boolean-composable (AND/OR/NOT). Triantafyllopoulos et al. [10] recently
+applied this to LLM activation steering:
+
+```
+R = (1/N) XᵀX                    -- correlation matrix of pooled bipolar activations
+C = R (R + α⁻²I)⁻¹               -- the conceptor: a soft projection matrix, 0 ⪯ C ⪯ I
+direction = normalize(C · v)     -- v: the existing diff-in-means (Const) direction
+```
+
+`X` pools activations from *both* poles — terse-prompt and base-prompt response tokens at the target
+layer, matching the paper's bipolar training choice, so `C` characterizes the shared geometry of
+"what changes between these two conditions," not just one side of it. `α` ("aperture") controls how
+tightly `C` clings to `R`'s dominant directions: small `α` → more selective attenuation of the
+weaker directions, large `α` → `C → I`, i.e. no filtering at all. Both `R` and `C` are closed-form —
+no gradient descent, no epochs — so projecting the existing Const vector through `C` gets a
+geometry-aware direction "for free," and only the PSR gate on top needs training.
+
+This combination — PSR's trained per-token gate, over a conceptor-derived (rather than trained- or
+mean-diff-only) direction — is a hybrid, not something either source paper does on its own.
+
+**Where this stands:** dev-MSE only so far (a training-time proxy — how well the corrected hidden
+states match the target, not yet judged output quality), swept over `α`:
+
+| α | baseline dev MSE | final dev MSE |
+|---|---|---|
+| **2** | 33.66 | **14.12** |
+| 4 | 33.72 | 14.99 |
+| 8 | 33.60 | 15.80 |
+| 16 | 33.71 | 16.25 |
+| 32 | 33.64 | 16.42 |
+
+Lower `α` (tighter attenuation) monotonically wins across the whole grid, and it's still improving
+at the smallest value tested — this hasn't yet found where it actually bottoms out. Test-set
+generations and judged correctness for `psr_conceptor` and `psr_proper` are the natural next
+comparison against the `Prompt+Steer` numbers above, and aren't in this table because they haven't
+been run yet (see `src/generate_new_conditions.py`).
+
+## Codebase Structure and Data Flow
+
+The PSR/conceptor code follows three plain roles rather than a class hierarchy — a concept
+occasionally worth naming since it's easy to default into a "framework" shape (base classes,
+inheritance, config-objects-wrapping-config-objects) for what's really one training loop:
+
+- **State** (`psr_conceptor_state.py`) — plain dataclasses of leaf tensors (`GateParams`,
+  `PSRTrainedParams`), plus the closed-form conceptor math (`compute_conceptor`,
+  `conceptor_direction`). No `nn.Module`, no methods beyond trivial accessors — an optimizer is
+  built directly from `params.as_list()`.
+- **Logic** (`psr_conceptor_logic.py`) — free functions that take State and Data in, return a
+  tensor out: the gate forward pass, the `answer_only` mask, the live gradient-tracked hook, the
+  subsequent-layers MSE, the regularization term. Nothing here mutates hidden state that wasn't
+  passed in explicitly.
+- **Data** — `data_utils.py` / `model_common.py` (prompt-building, tokenization), untouched by any
+  of the above.
+
+Data flow through the pipeline, in order:
+
+```
+data_prep.py                                     (local)  -> data/{train,dev,test}.jsonl
+steering_const.py                                (GPU)     -> const_steer_{config,directions}
+  |
+  +-- steering_psr.py / steering_a_psr.py         (GPU)     -> {psr,a_psr}_probe.pt          (old baseline)
+  +-- train_psr_conceptor.py  (uses const_steer_directions + a closed-form conceptor)
+  +-- train_psr_proper.py     (direction jointly trained instead)
+  |
+generate.py --split test                         (GPU)     -> generations_test.jsonl          (original 8 conditions)
+generate_new_conditions.py --split test           (GPU)     -> generations_test_new_conditions.jsonl  (join on "id")
+  |
+judge*.py / analyze*.py                           (local)   -> summary_*.json, plots
+```
+
 ## Further work
+- ~~Prompt Steering Replacement (Heyman & Vandeputte) likely further improves conciseness~~ — implemented
+  (`train_psr_proper.py`). The open question now is whether a conceptor-projected direction
+  (`train_psr_conceptor.py`) beats a from-scratch trained one, and at what aperture — early dev-MSE
+  sweeps favor smaller apertures than tested so far (see above).
+- Conceptors' Boolean algebra (AND/OR/NOT) is unused here. It would let you compose e.g. "terse
+  AND NOT-verbose" from two separately-trained conceptors — a genuinely different question
+  (compositionality) than the one this repo currently tests (does steering beat prompting for one
+  concept), so it's scoped out rather than folded in.
+- `generate.py` doesn't yet know about the new conditions — `generate_new_conditions.py` is a
+  stopgap that writes a separate file. Folding all conditions into one generation + judging pass is
+  the natural next step before drawing test-set conclusions about PSR/conceptor vs. `Prompt+Steer`.
 - This same approach could be applied to any open model, most easily through `transformers`.
-- As seen above, Prompt Steering Replacement (Heyman & Vandeputte) likely further improves conciseness and adherence to instructions.
 - The task is code **explanation** only. This mirrors the use case within Caveman and popular for code assistant usage as a whole.
 
 ## 👋
@@ -226,14 +352,15 @@ Please connect with me on [LinkedIn](https://www.linkedin.com/in/exia/) if you f
 ## Running it
 
 Everything in `src/data_prep.py`, `src/judge*.py`, and `src/analyze*.py` can run locally — no GPU
-needed. The GPU-bound steps (`steering_const.py`, `sweep_dev.py`, `generate.py`) run on a rented
-GPU pod via `infra/run_gpu_pipeline.sh` (or invoked directly, as when re-running just one step).
+needed. The GPU-bound steps run on a rented GPU pod via `infra/run_gpu_pipeline.sh` (or invoked
+directly, as when re-running just one step) — use `infra/setup_runpod.sh` for a bare RunPod pod, or
+`infra/setup_colab.sh` if running through a Colab tunnel with Drive-backed persistence instead.
 
 ```
 python3 src/data_prep.py                        # local — data/{train,dev,test}.jsonl
 
 # on the GPU pod:
-bash infra/setup_runpod.sh
+bash infra/setup_runpod.sh                      # or infra/setup_colab.sh on Colab
 python3 src/steering_const.py                   # -> results/const_steer_{config.json,directions.pt}
 python3 src/sweep_dev.py                        # -> results/sweep_dev.jsonl (all grid configs, dev)
 
@@ -243,7 +370,12 @@ python3 src/judge_sweep.py                      # -> results/judged_sweep_dev.js
 python3 src/analyze_sweep.py                    # -> results/summary_sweep_dev.json, plot
 
 # back on the GPU pod, with the final chosen config:
-python3 src/generate.py --split test            # -> results/generations_test.jsonl
+python3 src/generate.py --split test            # -> results/generations_test.jsonl (original 8 conditions)
+
+# PSR / PSR-Conceptor (also GPU-bound; reuses const_steer_directions.pt as the diff-in-means base):
+python3 src/train_psr_conceptor.py              # -> results/psr_conceptor_{probe,train_log}.pt/.json
+python3 src/train_psr_proper.py                 # -> results/psr_proper_{probe,train_log}.pt/.json
+python3 src/generate_new_conditions.py --split test  # -> results/generations_test_new_conditions.jsonl
 
 # back locally:
 python3 src/judge.py --split test               # -> results/judged_test.jsonl (needs openai.key)
@@ -283,3 +415,10 @@ https://arxiv.org/abs/2312.06681
 [8] Samuel Marks, Max Tegmark. "The Geometry of Truth: Emergent Linear Structure in Large
 Language Model Representations of True/False Datasets." arXiv:2310.06824.
 https://arxiv.org/abs/2310.06824
+
+[9] Herbert Jaeger. "Controlling Recurrent Neural Networks by Conceptors." arXiv:1403.3369.
+https://arxiv.org/abs/1403.3369
+
+[10] Ilias Triantafyllopoulos, Young-Min Cho, Ren Tao, Miranda Muqing Miao, Sunny Rai, Lyle Ungar,
+Sharath Chandra Guntuku, Neville Ryant, João Sedoc. "Conceptors for Semantic Steering."
+arXiv:2605.04980. https://arxiv.org/abs/2605.04980
