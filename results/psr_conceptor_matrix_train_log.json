@@ -1,0 +1,9 @@
+{
+  "layer": 14,
+  "alpha": 4.0,
+  "lr": 0.001,
+  "reg_coeff": 0.1,
+  "baseline_dev_mse": 33.690509986877444,
+  "completed_epochs": 3,
+  "dev_mse_after_last_completed_epoch": 32.173582019805906
+}

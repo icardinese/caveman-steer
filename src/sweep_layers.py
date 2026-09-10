@@ -145,6 +145,12 @@ def main(layer_grid: list[int]) -> None:
 
     out_path = RESULTS_DIR / "layer_sweep.jsonl"
     results = []
+    done = set()
+    if out_path.exists():
+        for row in read_jsonl(out_path):
+            results.append(row)
+            done.add((row["layer"], row["method"], row["alpha"]))
+        print(f"resuming: {len(done)} (layer, method, alpha) combos already done in {out_path}")
 
     for layer_idx in layer_grid:
         print(f"\n=== layer {layer_idx} ===")
@@ -166,20 +172,26 @@ def main(layer_grid: list[int]) -> None:
         hidden_size = base_pool.shape[1]
 
         # psr_proper: jointly trained direction, no conceptor
-        proper_params = init_psr_trained_params(hidden_size, device)
-        baseline_mse, final_mse = train_gate(
-            model, tokenizer, proper_params.direction, proper_params, layer_idx, n_layers,
-            train_rows, dev_rows, train_responses, dev_responses,
-        )
-        print(f"  psr_proper: baseline={baseline_mse:.4f} -> final={final_mse:.4f}")
-        results.append({
-            "layer": layer_idx, "method": "psr_proper", "alpha": None,
-            "baseline_mse": baseline_mse, "final_mse": final_mse, **diag,
-        })
+        if (layer_idx, "psr_proper", None) in done:
+            print(f"  psr_proper: already done, skipping")
+        else:
+            proper_params = init_psr_trained_params(hidden_size, device)
+            baseline_mse, final_mse = train_gate(
+                model, tokenizer, proper_params.direction, proper_params, layer_idx, n_layers,
+                train_rows, dev_rows, train_responses, dev_responses,
+            )
+            print(f"  psr_proper: baseline={baseline_mse:.4f} -> final={final_mse:.4f}")
+            results.append({
+                "layer": layer_idx, "method": "psr_proper", "alpha": None,
+                "baseline_mse": baseline_mse, "final_mse": final_mse, **diag,
+            })
 
         # psr_conceptor: closed-form direction at each alpha in the (narrowed) grid
         pooled_r = torch.cat([base_pool, instr_pool], dim=0)
         for alpha in CONCEPTOR_ALPHAS:
+            if (layer_idx, "psr_conceptor", alpha) in done:
+                print(f"  psr_conceptor alpha={alpha}: already done, skipping")
+                continue
             conceptor = compute_conceptor(pooled_r, alpha=alpha)
             direction = conceptor_direction(conceptor, diff_mean_direction)
             gate_params = init_gate_params(hidden_size, device)
