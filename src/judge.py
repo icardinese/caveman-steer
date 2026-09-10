@@ -1,9 +1,12 @@
-"""Score each generated explanation for correctness and coherence with an LLM judge. Runs locally
-(no GPU needed) — only reads results/generations_<split>.jsonl produced by generate.py on the GPU pod.
+"""Score the 4 new conditions (psr_conceptor, prompt_psr_conceptor, psr_proper, prompt_psr_proper)
+for correctness and coherence, same rubric/model as judge.py. Runs locally (no GPU needed) --
+only reads results/generations_<split>_new_conditions.jsonl (from generate_new_conditions.py)
+plus data/<split>.jsonl (for code + reference_explanation, which the generations file doesn't
+duplicate) and joins them on "id".
 
-Resumable, same pattern as generate.py: writes each row immediately and skips any row id already
-present in the output file on startup. With 8 conditions x 180 rows = 1,440 real API calls, losing
-partial progress to a crash mid-run means re-paying for and re-running calls that already succeeded."""
+No resumability here, matching judge.py's own convention -- a full re-run is 4 conditions x
+however many rows, i.e. half the API calls judge.py makes for the original 8.
+"""
 import argparse
 import json
 import re
@@ -12,11 +15,11 @@ from pathlib import Path
 
 from openai import OpenAI
 
-from data_utils import RESULTS_DIR, append_jsonl, read_jsonl
+from data_utils import DATA_DIR, RESULTS_DIR, read_jsonl, write_jsonl
 
 KEY_PATH = Path(__file__).resolve().parent.parent / "openai.key"
 JUDGE_MODEL = "gpt-4o-mini"
-CONDITIONS = ["base", "prompt", "const", "prompt_const", "psr", "prompt_psr", "a_psr", "prompt_a_psr"]
+CONDITIONS = ["psr_conceptor", "prompt_psr_conceptor", "psr_proper", "prompt_psr_proper"]
 
 RUBRIC = """You are grading an automatically generated explanation of a Python function.
 
@@ -59,51 +62,33 @@ def judge_one(client: OpenAI, code: str, reference_explanation: str, candidate: 
             time.sleep(2**attempt)
 
 
-def already_done_ids(out_path) -> set:
-    if not out_path.exists():
-        return set()
-    done = set()
-    with out_path.open() as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                done.add(json.loads(line)["id"])
-            except (json.JSONDecodeError, KeyError):
-                continue
-    return done
-
-
 def main(split: str) -> None:
     api_key = KEY_PATH.read_text().strip()
     client = OpenAI(api_key=api_key)
-    rows = read_jsonl(RESULTS_DIR / f"generations_{split}.jsonl")
 
-    out_path = RESULTS_DIR / f"judged_{split}.jsonl"
-    done_ids = already_done_ids(out_path)
-    if done_ids:
-        print(f">>> Resuming: {len(done_ids)}/{len(rows)} rows already judged in {out_path}, skipping those")
+    gen_rows = read_jsonl(RESULTS_DIR / f"generations_{split}_new_conditions.jsonl")
+    data_rows = {row["id"]: row for row in read_jsonl(DATA_DIR / f"{split}.jsonl")}
 
-    n_processed = 0
-    for i, row in enumerate(rows):
-        if row["id"] in done_ids:
+    out_rows = []
+    for i, gen_row in enumerate(gen_rows):
+        data_row = data_rows.get(gen_row["id"])
+        if data_row is None:
+            print(f"WARNING: id {gen_row['id']} in generations file but not in data/{split}.jsonl, skipping")
             continue
 
-        judged = {"id": row["id"]}
+        judged = {"id": gen_row["id"]}
         for cond in CONDITIONS:
-            candidate = row[f"{cond}_response"]
-            score = judge_one(client, row["code"], row["reference_explanation"], candidate)
+            candidate = gen_row[f"{cond}_response"]
+            score = judge_one(client, data_row["code"], data_row["reference_explanation"], candidate)
             judged[f"{cond}_correct"] = score["correct"]
             judged[f"{cond}_coherent"] = score["coherent"]
-            judged[f"{cond}_tokens"] = row[f"{cond}_tokens"]
+            judged[f"{cond}_tokens"] = gen_row[f"{cond}_tokens"]
+        out_rows.append(judged)
+        if (i + 1) % 10 == 0:
+            print(f"{i + 1}/{len(gen_rows)} judged")
 
-        append_jsonl(out_path, judged)  # written and flushed immediately, not batched
-        n_processed += 1
-        if n_processed % 10 == 0:
-            print(f"{len(done_ids) + n_processed}/{len(rows)} judged")
-
-    print(f"done. {out_path} now has {len(done_ids) + n_processed}/{len(rows)} rows")
+    write_jsonl(RESULTS_DIR / f"judged_{split}_new_conditions.jsonl", out_rows)
+    print(f"wrote {len(out_rows)} rows to results/judged_{split}_new_conditions.jsonl")
 
 
 if __name__ == "__main__":
