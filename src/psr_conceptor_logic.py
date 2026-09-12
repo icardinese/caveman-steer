@@ -97,6 +97,59 @@ def load_or_compute_responses(model, tokenizer, rows: list[dict], cache_path) ->
         json.dump(responses, f)
     return responses
 
+def compute_delta_scale(conceptor, mu_instr, reference_pool):
+    """Typical norm of C @ (mu_instr - h) over real activations -- computed ONCE from data, used to
+    rescale gate_correction_matrix's correction to O(1) at a tiny/untrained coefficient. Without
+    this, an untrained gate's "tiny" coefficient times an UNNORMALIZED C @ delta (which can have
+    norm ~100 on real residual-stream activations, confirmed empirically: baseline_dev_mse=93 vs
+    ~33 for every other method) actively corrupts the hidden state before training even starts.
+    The old fixed-vector version never had this problem because `direction` was explicitly
+    unit-normalized (v / v.norm()); this is the same fix, applied to a per-token quantity instead."""
+    delta = mu_instr.unsqueeze(0) - reference_pool  # (N, d)
+    c_delta = delta @ conceptor
+    return c_delta.norm(dim=-1).mean().clamp(min=1e-6)
+
+
+def gate_correction_matrix(params, conceptor, mu_instr, delta_scale, hidden, mask=None):
+    """Genuine matrix application: correction(h) = coeff(h) * (C @ (mu_instr - h)) / delta_scale,
+    evaluated fresh at every position, every forward call -- unlike gate_correction(), which reduces
+    C to a single fixed vector computed once (C @ base_direction) and then never touches C again.
+    Here C filters the ACTUAL per-token gap between the current hidden state and the instructed-mean
+    target through the concept's subspace, so it does real ongoing work instead of a one-time vector
+    reshape. delta_scale (from compute_delta_scale) keeps this at the same O(1)-at-tiny-coefficient
+    scale the fixed-vector version got for free from unit-normalizing its direction."""
+    fit = location_fit(params, hidden.float())
+    if mask is not None:
+        fit = torch.where(mask, fit, torch.zeros_like(fit))
+    desired_presence = 1.0 + params.coeff_bias
+    coeff = desired_presence * fit  # (batch, seq, 1)
+
+    delta = mu_instr.to(hidden.dtype) - hidden  # (batch, seq, d) -- varies per position, unlike a fixed direction
+    c_delta = delta @ conceptor.to(hidden.dtype)  # (batch, seq, d) -- C is symmetric, this is C @ delta per-position
+    c_delta = c_delta / delta_scale.to(hidden.dtype)
+    correction = coeff * c_delta
+    return correction.to(hidden.dtype), fit
+
+
+def forward_with_gate_hook_matrix(model, params, conceptor, mu_instr, delta_scale, layer_idx, input_ids, n_resp):
+    """Same contract as forward_with_gate_hook, but using gate_correction_matrix instead of a fixed
+    direction -- the genuine matrix-application variant."""
+    layer = model.model.layers[layer_idx]
+    captured_fit = {}
+
+    def wrapped(module, inputs, output):
+        hidden = output[0]
+        mask = answer_only_mask(hidden.shape[1], n_resp, hidden.device)
+        correction, fit = gate_correction_matrix(params, conceptor, mu_instr, delta_scale, hidden, mask=mask)
+        captured_fit["fit"] = fit
+        return (hidden + correction,) + tuple(output[1:])
+
+    handle = layer.register_forward_hook(wrapped)
+    try:
+        out = model(input_ids=input_ids, output_hidden_states=True)
+    finally:
+        handle.remove()
+    return out.hidden_states, captured_fit["fit"]
 
 @torch.no_grad()
 def collect_pooled_activations_for_conceptor(
@@ -236,3 +289,53 @@ def train_step(
     # sequence here is equivalent to summing just the response span -- no manual slicing needed.
     reg = regularization_loss(fit_vals, reg_coeff)
     return mse + reg
+
+def compute_selfproj_delta_scale(conceptor, reference_pool):
+    """Typical norm of (C @ h - h) over real activations -- same normalization discipline as
+    compute_delta_scale, computed once from data. No mu_instr needed here at all: this variant
+    doesn't aim at any external target, just measures how far C's own projection of h differs
+    from h itself."""
+    c_h = reference_pool @ conceptor
+    delta = c_h - reference_pool
+    return delta.norm(dim=-1).mean().clamp(min=1e-6)
+
+
+def gate_correction_selfproj(params, conceptor, delta_scale, hidden, mask=None):
+    """correction(h) = coeff(h) * (C @ h - h) / delta_scale -- moves h toward ITS OWN projection
+    onto the concept-relevant subspace, no external target vector at all. This is closer to the
+    literature's standard conceptor soft-filter usage than gate_correction_matrix's mu_instr version,
+    and removes a real confound that version had: mu_instr is a population-average target, but the
+    training loss grades against each example's OWN true instructed activation, not the population
+    mean -- so that version was testing two things at once (matrix-vs-vector AND population-mean-vs-
+    per-example-target). This variant isolates the matrix-vs-vector question cleanly."""
+    fit = location_fit(params, hidden.float())
+    if mask is not None:
+        fit = torch.where(mask, fit, torch.zeros_like(fit))
+    desired_presence = 1.0 + params.coeff_bias
+    coeff = desired_presence * fit
+
+    c_h = hidden.float() @ conceptor.to(hidden.dtype).float()
+    delta = c_h - hidden.float()
+    delta = delta / delta_scale.to(hidden.dtype)
+    correction = coeff * delta
+    return correction.to(hidden.dtype), fit
+
+
+def forward_with_gate_hook_selfproj(model, params, conceptor, delta_scale, layer_idx, input_ids, n_resp):
+    """Same contract as forward_with_gate_hook, using gate_correction_selfproj."""
+    layer = model.model.layers[layer_idx]
+    captured_fit = {}
+
+    def wrapped(module, inputs, output):
+        hidden = output[0]
+        mask = answer_only_mask(hidden.shape[1], n_resp, hidden.device)
+        correction, fit = gate_correction_selfproj(params, conceptor, delta_scale, hidden, mask=mask)
+        captured_fit["fit"] = fit
+        return (hidden + correction,) + tuple(output[1:])
+
+    handle = layer.register_forward_hook(wrapped)
+    try:
+        out = model(input_ids=input_ids, output_hidden_states=True)
+    finally:
+        handle.remove()
+    return out.hidden_states, captured_fit["fit"]

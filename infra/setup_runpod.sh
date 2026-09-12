@@ -28,10 +28,15 @@ export HF_HOME="$DRIVE_BACKUP_DIR/hf_cache"
 echo "export HF_HOME=\"$DRIVE_BACKUP_DIR/hf_cache\"" >> ~/.bashrc
 
 python3 -c "
+import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 name = 'Qwen/Qwen2.5-Coder-7B-Instruct'
 AutoTokenizer.from_pretrained(name)
+<<<<<<< HEAD
 AutoModelForCausalLM.from_pretrained(name)
+=======
+AutoModelForCausalLM.from_pretrained(name, torch_dtype=torch.bfloat16, device_map='auto')
+>>>>>>> b987d343167a24781f8484775ee0835a6fd05157
 print('model cached to', __import__('os').environ.get('HF_HOME'))
 "
 

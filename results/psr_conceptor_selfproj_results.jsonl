@@ -1,0 +1,5 @@
+{"percentile": 10, "alpha": 6.599828709624941, "mean_mu": 0.7998216152191162, "delta_scale": 3.2387335300445557, "skipped": false, "baseline_mse": 33.717795333862306, "final_mse": 33.697913055419924}
+{"percentile": 30, "alpha": 4.088063574211222, "mean_mu": 0.6625853776931763, "delta_scale": 5.722364902496338, "skipped": false, "baseline_mse": 33.74086513519287, "final_mse": 33.47340692520142}
+{"percentile": 50, "alpha": 2.64094999783017, "mean_mu": 0.5201284289360046, "delta_scale": 8.994789123535156, "skipped": false, "baseline_mse": 33.701871681213376, "final_mse": 33.27800790786743}
+{"percentile": 70, "alpha": 1.5913107412392806, "mean_mu": 0.36096590757369995, "delta_scale": 14.005812644958496, "skipped": false, "baseline_mse": 33.73063446044922, "final_mse": 32.85105895996094}
+{"percentile": 90, "alpha": 0.6809327228793933, "mean_mu": 0.16124360263347626, "delta_scale": 25.232194900512695, "skipped": false, "baseline_mse": 33.696431427001954, "final_mse": 31.750316352844237}
